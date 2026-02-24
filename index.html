@@ -7,10 +7,9 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-        import { getFirestore, doc, setDoc, onSnapshot, updateDoc, getDoc } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+        import { getFirestore, doc, setDoc, onSnapshot, updateDoc, getDoc, terminate, clearIndexedDbPersistence } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
         import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
 
-        // 스크린샷 12:34 기준 최신 앱 설정값
         const firebaseConfig = {
             apiKey: "AIzaSyAWtdYncScCZgMJiy1SZRq1eOylmby5syI",
             authDomain: "tictactoe-a7f97.firebaseapp.com",
@@ -30,17 +29,16 @@
         let currentBoard = Array(9).fill("");
         let currentTurn = "X";
         let unsub = null;
-        let userLoaded = false;
+        let isAuthReady = false;
 
-        // 1. 인증 체크 (익명 로그인)
+        // 인증 상태 감시
         onAuthStateChanged(auth, (user) => {
             if (user) {
-                console.log("Firebase 인증 성공:", user.uid);
-                userLoaded = true;
+                isAuthReady = true;
+                console.log("서버 연결 대기 중...");
             } else {
                 signInAnonymously(auth).catch(err => {
-                    console.error("인증 실패:", err);
-                    alert("인증 오류: Firebase 콘솔 -> Authentication -> 익명 로그인을 '사용 설정' 해주세요.");
+                    alert("인증 오류! Firebase에서 익명 로그인을 켰는지 확인하세요.");
                 });
             }
         });
@@ -52,7 +50,7 @@
         };
 
         window.joinRoom = async () => {
-            if (!userLoaded) return alert("서버에 접속 중입니다. 잠시만 기다려주세요.");
+            if (!isAuthReady) return alert("인증 중입니다. 잠시만 기다려주세요.");
             
             const inputId = document.getElementById('roomInput').value.trim();
             if (!inputId) return;
@@ -61,18 +59,21 @@
             const roomRef = doc(db, "rooms", roomId);
             
             try {
-                // 2. Firestore 읽기 테스트
+                // 오프라인 에러 방지를 위해 강제 서버 조회
                 const roomSnap = await getDoc(roomRef);
                 
                 if (!roomSnap.exists()) {
                     myMark = "X";
-                    // 3. Firestore 쓰기 테스트
-                    await setDoc(roomRef, { board: Array(9).fill(""), turn: "X", winner: "" });
+                    await setDoc(roomRef, { 
+                        board: Array(9).fill(""), 
+                        turn: "X", 
+                        winner: "",
+                        timestamp: Date.now() 
+                    });
                 } else {
                     if (!myMark) myMark = "O";
                 }
 
-                // 4. 실시간 수신 테스트
                 if (unsub) unsub();
                 unsub = onSnapshot(roomRef, (snap) => {
                     const data = snap.data();
@@ -81,16 +82,18 @@
                     currentBoard = data.board;
                     currentTurn = data.turn;
                     updateStatus(data);
-                }, (error) => {
-                    console.error("Firestore 규칙 에러:", error);
-                    alert("데이터 수신 거부! Firestore '보안 규칙'에서 [게시] 버튼을 눌렀는지 다시 확인해주세요.");
+                }, (err) => {
+                    console.error("Firestore 리스너 에러:", err);
+                    if(err.code === 'unavailable') {
+                        alert("서버 연결 일시 중단: 잠시 후 다시 입장 버튼을 눌러보세요.");
+                    }
                 });
 
                 document.getElementById('lobby').classList.add('hidden');
                 document.getElementById('game-area').classList.remove('hidden');
             } catch (error) {
-                console.error("전체 에러:", error);
-                alert("연결 실패! 원인: " + error.message);
+                console.error("에러 내용:", error);
+                alert("연결 시도 중: " + error.message);
             }
         };
 
@@ -106,7 +109,7 @@
         function updateStatus(data) {
             const status = document.getElementById('status');
             const info = document.getElementById('info');
-            info.innerText = `방 ID: ${roomId} | 내 기호: ${myMark}`;
+            info.innerText = `ROOM: ${roomId} | YOU: ${myMark}`;
             if (data.winner) {
                 status.innerText = data.winner === 'Draw' ? "무승부!" : `${data.winner} 승리!`;
                 status.className = "text-3xl font-bold text-yellow-400 mb-6";
@@ -150,23 +153,23 @@
         <h1 class="text-3xl font-black mb-6">틱택토 온라인</h1>
         <input id="roomInput" type="text" placeholder="방 번호 입력" class="w-full bg-black border border-gray-700 rounded-xl px-4 py-3 mb-4 text-center text-xl font-bold text-white focus:ring-2 focus:ring-blue-500 outline-none">
         <button onclick="joinRoom()" class="w-full bg-blue-600 py-4 rounded-xl font-bold mb-2 active:scale-95 transition">입장</button>
-        <button onclick="createRandomRoom()" class="w-full bg-gray-800 py-2 rounded-xl text-xs text-gray-400">랜덤 방 만들기</button>
+        <button onclick="createRandomRoom()" class="w-full bg-gray-800 py-2 rounded-xl text-xs text-gray-400">랜덤 방 번호</button>
     </div>
     <div id="game-area" class="hidden text-center w-80">
-        <div id="info" class="text-[10px] text-gray-500 mb-2 font-mono"></div>
+        <div id="info" class="text-[10px] text-gray-500 mb-2 font-mono uppercase tracking-widest"></div>
         <div id="status"></div>
-        <div class="grid grid-cols-3 gap-3 bg-white/5 p-3 rounded-3xl border border-white/10 shadow-inner">
-            <div id="cell-0" onclick="makeMove(0)" class="aspect-square flex items-center justify-center bg-gray-900 rounded-2xl cursor-pointer h-24"></div>
-            <div id="cell-1" onclick="makeMove(1)" class="aspect-square flex items-center justify-center bg-gray-900 rounded-2xl cursor-pointer h-24"></div>
-            <div id="cell-2" onclick="makeMove(2)" class="aspect-square flex items-center justify-center bg-gray-900 rounded-2xl cursor-pointer h-24"></div>
-            <div id="cell-3" onclick="makeMove(3)" class="aspect-square flex items-center justify-center bg-gray-900 rounded-2xl cursor-pointer h-24"></div>
-            <div id="cell-4" onclick="makeMove(4)" class="aspect-square flex items-center justify-center bg-gray-900 rounded-2xl cursor-pointer h-24"></div>
-            <div id="cell-5" onclick="makeMove(5)" class="aspect-square flex items-center justify-center bg-gray-900 rounded-2xl cursor-pointer h-24"></div>
-            <div id="cell-6" onclick="makeMove(6)" class="aspect-square flex items-center justify-center bg-gray-900 rounded-2xl cursor-pointer h-24"></div>
-            <div id="cell-7" onclick="makeMove(7)" class="aspect-square flex items-center justify-center bg-gray-900 rounded-2xl cursor-pointer h-24"></div>
-            <div id="cell-8" onclick="makeMove(8)" class="aspect-square flex items-center justify-center bg-gray-900 rounded-2xl cursor-pointer h-24"></div>
+        <div class="grid grid-cols-3 gap-3 bg-white/5 p-3 rounded-3xl border border-white/10">
+            <div id="cell-0" onclick="makeMove(0)" class="aspect-square flex items-center justify-center bg-gray-900 rounded-2xl cursor-pointer h-24 shadow-lg active:bg-gray-800"></div>
+            <div id="cell-1" onclick="makeMove(1)" class="aspect-square flex items-center justify-center bg-gray-900 rounded-2xl cursor-pointer h-24 shadow-lg active:bg-gray-800"></div>
+            <div id="cell-2" onclick="makeMove(2)" class="aspect-square flex items-center justify-center bg-gray-900 rounded-2xl cursor-pointer h-24 shadow-lg active:bg-gray-800"></div>
+            <div id="cell-3" onclick="makeMove(3)" class="aspect-square flex items-center justify-center bg-gray-900 rounded-2xl cursor-pointer h-24 shadow-lg active:bg-gray-800"></div>
+            <div id="cell-4" onclick="makeMove(4)" class="aspect-square flex items-center justify-center bg-gray-900 rounded-2xl cursor-pointer h-24 shadow-lg active:bg-gray-800"></div>
+            <div id="cell-5" onclick="makeMove(5)" class="aspect-square flex items-center justify-center bg-gray-900 rounded-2xl cursor-pointer h-24 shadow-lg active:bg-gray-800"></div>
+            <div id="cell-6" onclick="makeMove(6)" class="aspect-square flex items-center justify-center bg-gray-900 rounded-2xl cursor-pointer h-24 shadow-lg active:bg-gray-800"></div>
+            <div id="cell-7" onclick="makeMove(7)" class="aspect-square flex items-center justify-center bg-gray-900 rounded-2xl cursor-pointer h-24 shadow-lg active:bg-gray-800"></div>
+            <div id="cell-8" onclick="makeMove(8)" class="aspect-square flex items-center justify-center bg-gray-900 rounded-2xl cursor-pointer h-24 shadow-lg active:bg-gray-800"></div>
         </div>
-        <button onclick="resetGame()" class="mt-8 text-gray-500 text-sm underline">초기화</button>
+        <button onclick="resetGame()" class="mt-8 text-gray-500 text-sm underline">게임 초기화</button>
     </div>
 </body>
 </html>
