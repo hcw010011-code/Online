@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>실시간 틱택토 대결</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+        import { getFirestore, doc, setDoc, onSnapshot, updateDoc } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+
+        // 사용자가 제공한 Firebase 설정값 적용
+        const firebaseConfig = {
+            apiKey: "AIzaSyAWtdYncScCZgMJiy1SZRq1eO...", 
+            authDomain: "tictactoe-a7f97.firebaseapp.com",
+            projectId: "tictactoe-a7f97",
+            storageBucket: "tictactoe-a7f97.appspot.com",
+            messagingSenderId: "113959866370",
+            appId: "1:113959866370:web:7e45128e24e2..."
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+
+        let roomId = "";
+        let myMark = ""; 
+        let currentBoard = Array(9).fill("");
+        let currentTurn = "X";
+
+        // 무작위 방 만들기
+        window.createRandomRoom = () => {
+            const randomId = Math.floor(1000 + Math.random() * 9000).toString();
+            document.getElementById('roomInput').value = randomId;
+            window.joinRoom();
+        };
+
+        window.joinRoom = async () => {
+            const inputId = document.getElementById('roomInput').value.trim();
+            if (!inputId) return alert("방 번호를 입력하세요!");
+
+            roomId = inputId;
+            const roomRef = doc(db, "rooms", roomId);
+
+            onSnapshot(roomRef, (snap) => {
+                if (!snap.exists()) {
+                    myMark = "X";
+                    setDoc(roomRef, {
+                        board: Array(9).fill(""),
+                        turn: "X",
+                        winner: ""
+                    });
+                } else {
+                    const data = snap.data();
+                    if (!myMark) myMark = "O";
+                    
+                    // 데이터가 변했을 때만 렌더링
+                    if (JSON.stringify(currentBoard) !== JSON.stringify(data.board)) {
+                        renderBoard(data.board);
+                    }
+                    currentBoard = data.board;
+                    currentTurn = data.turn;
+                    updateStatus(data);
+                }
+            });
+
+            document.getElementById('lobby').classList.add('hidden');
+            document.getElementById('game-area').classList.remove('hidden');
+        };
+
+        function renderBoard(board) {
+            board.forEach((val, i) => {
+                const cell = document.getElementById(`cell-${i}`);
+                if (val && cell.innerHTML === "") {
+                    cell.innerHTML = val === 'X' ? getXSVG() : getOSVG();
+                } else if (!val) {
+                    cell.innerHTML = "";
+                }
+            });
+        }
+
+        function updateStatus(data) {
+            const status = document.getElementById('status');
+            const info = document.getElementById('info');
+            info.innerText = `방 번호: ${roomId} | 내 기호: ${myMark}`;
+
+            if (data.winner) {
+                status.innerText = data.winner === 'Draw' ? "무승부!" : `${data.winner} 승리! 🎉`;
+                status.className = "text-3xl font-bold text-yellow-400 animate-bounce mb-6";
+            } else {
+                status.innerText = (data.turn === myMark) ? "🔥 내 차례입니다!" : "⌛ 상대방 대기 중...";
+                status.className = "text-xl text-white mb-6";
+            }
+        }
+
+        window.makeMove = async (i) => {
+            if (currentBoard[i] !== "" || currentTurn !== myMark) return;
+
+            const newBoard = [...currentBoard];
+            newBoard[i] = myMark;
+            const winner = checkWinner(newBoard);
+            const nextTurn = myMark === "X" ? "O" : "X";
+
+            await updateDoc(doc(db, "rooms", roomId), {
+                board: newBoard,
+                turn: nextTurn,
+                winner: winner || ""
+            });
+        };
+
+        function checkWinner(b) {
+            const lines = [[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]];
+            for (let [a,b_idx,c] of lines) {
+                if (b[a] && b[a] === b[b_idx] && b[a] === b[c]) return b[a];
+            }
+            return !b.includes("") ? "Draw" : null;
+        }
+
+        window.resetGame = async () => {
+            await updateDoc(doc(db, "rooms", roomId), {
+                board: Array(9).fill(""),
+                turn: "X",
+                winner: ""
+            });
+        };
+
+        // SVG 애니메이션 소스
+        function getXSVG() {
+            return `
+            <svg class="w-16 h-16" viewBox="0 0 100 100">
+                <path d="M20 20 L80 80" stroke="#60a5fa" stroke-width="10" stroke-linecap="round" fill="none" class="draw-path"/>
+                <path d="M80 20 L20 80" stroke="#60a5fa" stroke-width="10" stroke-linecap="round" fill="none" class="draw-path" style="animation-delay: 0.2s;"/>
+            </svg>`;
+        }
+
+        function getOSVG() {
+            return `
+            <svg class="w-16 h-16" viewBox="0 0 100 100">
+                <circle cx="50" cy="50" r="35" stroke="#f87171" stroke-width="10" stroke-linecap="round" fill="none" class="draw-circle"/>
+            </svg>`;
+        }
+    </script>
+    <style>
+        @keyframes draw {
+            to { stroke-dashoffset: 0; }
+        }
+        .draw-path {
+            stroke-dasharray: 100;
+            stroke-dashoffset: 100;
+            animation: draw 0.4s ease-out forwards;
+        }
+        .draw-circle {
+            stroke-dasharray: 220;
+            stroke-dashoffset: 220;
+            animation: draw 0.6s ease-out forwards;
+        }
+        body { background: radial-gradient(circle at center, #1e293b, #0f172a); }
+    </style>
+</head>
+<body class="flex items-center justify-center min-h-screen text-white font-sans overflow-hidden">
+
+    <!-- 로비 화면 -->
+    <div id="lobby" class="w-full max-w-sm px-6">
+        <div class="bg-gray-900/50 backdrop-blur-xl p-8 rounded-3xl border border-white/10 shadow-2xl text-center">
+            <h1 class="text-4xl font-black mb-2 tracking-tighter">TIC TAC TOE</h1>
+            <p class="text-gray-400 text-sm mb-8">실시간 온라인 대결</p>
+            
+            <input id="roomInput" type="text" placeholder="방 번호를 입력하세요" 
+                class="w-full bg-black/40 border border-white/10 rounded-2xl px-5 py-4 mb-4 text-center text-xl font-bold focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
+            
+            <div class="grid grid-cols-2 gap-3">
+                <button onclick="joinRoom()" class="bg-blue-600 hover:bg-blue-500 py-4 rounded-2xl font-bold shadow-lg transition-all active:scale-95">입장하기</button>
+                <button onclick="createRandomRoom()" class="bg-white/10 hover:bg-white/20 py-4 rounded-2xl font-bold transition-all active:scale-95 border border-white/5 text-sm">랜덤 방 만들기</button>
+            </div>
+            <p class="text-[10px] text-gray-500 mt-6 uppercase tracking-widest">Powered by Firebase & Netlify</p>
+        </div>
+    </div>
+
+    <!-- 게임 대결 화면 -->
+    <div id="game-area" class="hidden w-full max-w-md text-center px-4">
+        <div id="info" class="text-[11px] font-mono text-gray-500 mb-2 tracking-widest uppercase"></div>
+        <div id="status" class="mb-8"></div>
+        
+        <div class="grid grid-cols-3 gap-3 bg-white/5 p-3 rounded-3xl border border-white/10 shadow-2xl">
+            <div id="cell-0" onclick="makeMove(0)" class="cell aspect-square flex items-center justify-center bg-gray-900/80 rounded-2xl cursor-pointer hover:bg-gray-800 transition-all"></div>
+            <div id="cell-1" onclick="makeMove(1)" class="cell aspect-square flex items-center justify-center bg-gray-900/80 rounded-2xl cursor-pointer hover:bg-gray-800 transition-all"></div>
+            <div id="cell-2" onclick="makeMove(2)" class="cell aspect-square flex items-center justify-center bg-gray-900/80 rounded-2xl cursor-pointer hover:bg-gray-800 transition-all"></div>
+            <div id="cell-3" onclick="makeMove(3)" class="cell aspect-square flex items-center justify-center bg-gray-900/80 rounded-2xl cursor-pointer hover:bg-gray-800 transition-all"></div>
+            <div id="cell-4" onclick="makeMove(4)" class="cell aspect-square flex items-center justify-center bg-gray-900/80 rounded-2xl cursor-pointer hover:bg-gray-800 transition-all"></div>
+            <div id="cell-5" onclick="makeMove(5)" class="cell aspect-square flex items-center justify-center bg-gray-900/80 rounded-2xl cursor-pointer hover:bg-gray-800 transition-all"></div>
+            <div id="cell-6" onclick="makeMove(6)" class="cell aspect-square flex items-center justify-center bg-gray-900/80 rounded-2xl cursor-pointer hover:bg-gray-800 transition-all"></div>
+            <div id="cell-7" onclick="makeMove(7)" class="cell aspect-square flex items-center justify-center bg-gray-900/80 rounded-2xl cursor-pointer hover:bg-gray-800 transition-all"></div>
+            <div id="cell-8" onclick="makeMove(8)" class="cell aspect-square flex items-center justify-center bg-gray-900/80 rounded-2xl cursor-pointer hover:bg-gray-800 transition-all"></div>
+        </div>
+
+        <div class="mt-10 flex justify-center gap-6">
+            <button onclick="resetGame()" class="text-gray-500 hover:text-white text-sm underline underline-offset-4 transition-all font-medium">게임 초기화</button>
+            <button onclick="location.reload()" class="text-gray-500 hover:text-white text-sm underline underline-offset-4 transition-all font-medium">로비로 이동</button>
+        </div>
+    </div>
+
+</body>
+</html>
+
