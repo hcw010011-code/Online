@@ -3,14 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>실시간 틱택토 대결</title>
+    <title>실시간 틱택토 온라인</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
         import { getFirestore, doc, setDoc, onSnapshot, updateDoc, getDoc } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
         import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
 
-        // 사용자가 제공한 Firebase 설정값 적용 완료
+        // 사용자가 제공한 Firebase 설정 (Screenshot 12:34 기준)
         const firebaseConfig = {
             apiKey: "AIzaSyAWtdYncScCZgMJiy1SZRq1eOylmby5syI",
             authDomain: "tictactoe-a7f97.firebaseapp.com",
@@ -31,17 +31,17 @@
         let currentTurn = "X";
         let unsub = null;
 
-        // 익명 인증 실행 (Firestore 접근 권한 획득)
-        signInAnonymously(auth).catch(err => console.error("Firebase 인증 실패:", err));
+        // 익명 인증 실행
+        signInAnonymously(auth).catch(err => {
+            console.error("인증 실패: Authentication 메뉴에서 익명 로그인을 켜주세요.", err);
+        });
 
-        // 무작위 방 번호 생성
         window.createRandomRoom = () => {
             const randomId = Math.floor(1000 + Math.random() * 9000).toString();
             document.getElementById('roomInput').value = randomId;
             window.joinRoom();
         };
 
-        // 방 입장 처리
         window.joinRoom = async () => {
             const inputId = document.getElementById('roomInput').value.trim();
             if (!inputId) return alert("방 번호를 입력하세요!");
@@ -51,27 +51,17 @@
             
             try {
                 const roomSnap = await getDoc(roomRef);
-
                 if (!roomSnap.exists()) {
-                    // 내가 처음 만드는 사람 (X)
                     myMark = "X";
-                    await setDoc(roomRef, {
-                        board: Array(9).fill(""),
-                        turn: "X",
-                        winner: ""
-                    });
+                    await setDoc(roomRef, { board: Array(9).fill(""), turn: "X", winner: "" });
                 } else {
-                    // 이미 있는 방에 입장 (O)
                     if (!myMark) myMark = "O";
                 }
 
-                // 실시간 동기화 시작
                 if (unsub) unsub();
                 unsub = onSnapshot(roomRef, (snap) => {
-                    if (!snap.exists()) return;
                     const data = snap.data();
-                    
-                    // 보드 판 그리기
+                    if (!data) return;
                     renderBoard(data.board);
                     currentBoard = data.board;
                     currentTurn = data.turn;
@@ -81,8 +71,7 @@
                 document.getElementById('lobby').classList.add('hidden');
                 document.getElementById('game-area').classList.remove('hidden');
             } catch (error) {
-                console.error("입장 중 에러:", error);
-                alert("연결 실패! Firebase 콘솔에서 Firestore 규칙을 허용해주세요.");
+                alert("연결 실패! 규칙 게시 확인 및 익명 로그인을 활성화하세요.");
             }
         };
 
@@ -91,107 +80,75 @@
                 const cell = document.getElementById(`cell-${i}`);
                 if (val && cell.innerHTML === "") {
                     cell.innerHTML = val === 'X' ? getXSVG() : getOSVG();
-                } else if (!val) {
-                    cell.innerHTML = "";
-                }
+                } else if (!val) { cell.innerHTML = ""; }
             });
         }
 
         function updateStatus(data) {
             const status = document.getElementById('status');
             const info = document.getElementById('info');
-            info.innerText = `방 ID: ${roomId} | 나의 기호: ${myMark}`;
-
+            info.innerText = `방 ID: ${roomId} | 내 기호: ${myMark}`;
             if (data.winner) {
-                status.innerText = data.winner === 'Draw' ? "무승부!" : `${data.winner} 승리! 🎉`;
-                status.className = "text-3xl font-bold text-yellow-400 animate-bounce mb-6";
+                status.innerText = data.winner === 'Draw' ? "무승부!" : `${data.winner} 승리!`;
+                status.className = "text-3xl font-bold text-yellow-400 mb-6";
             } else {
                 const isMyTurn = (data.turn === myMark);
-                status.innerText = isMyTurn ? "🔥 당신의 차례!" : "⌛ 상대방 대기 중...";
-                status.className = `text-xl mb-6 font-bold ${isMyTurn ? 'text-blue-400' : 'text-gray-400'}`;
+                status.innerText = isMyTurn ? "🔥 내 차례입니다!" : "⌛ 상대방 대기 중...";
+                status.className = `text-xl mb-6 font-bold ${isMyTurn ? 'text-blue-400' : 'text-gray-500'}`;
             }
         }
 
         window.makeMove = async (i) => {
             if (currentBoard[i] !== "" || currentTurn !== myMark || checkWinner(currentBoard)) return;
-
             const newBoard = [...currentBoard];
             newBoard[i] = myMark;
             const winner = checkWinner(newBoard);
-            const nextTurn = myMark === "X" ? "O" : "X";
-
-            await updateDoc(doc(db, "rooms", roomId), {
-                board: newBoard,
-                turn: nextTurn,
-                winner: winner || ""
-            });
+            await updateDoc(doc(db, "rooms", roomId), { board: newBoard, turn: myMark === "X" ? "O" : "X", winner: winner || "" });
         };
 
         function checkWinner(b) {
             const lines = [[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]];
-            for (let [a,b_idx,c] of lines) {
-                if (b[a] && b[a] === b[b_idx] && b[a] === b[c]) return b[a];
-            }
+            for (let [a,b_idx,c] of lines) { if (b[a] && b[a] === b[b_idx] && b[a] === b[c]) return b[a]; }
             return !b.includes("") ? "Draw" : null;
         }
 
         window.resetGame = async () => {
-            await updateDoc(doc(db, "rooms", roomId), {
-                board: Array(9).fill(""),
-                turn: "X",
-                winner: ""
-            });
+            await updateDoc(doc(db, "rooms", roomId), { board: Array(9).fill(""), turn: "X", winner: "" });
         };
 
-        // SVG 드로잉 애니메이션 함수
-        function getXSVG() {
-            return `<svg class="w-16 h-16" viewBox="0 0 100 100"><path d="M25 25 L75 75" stroke="#60a5fa" stroke-width="10" stroke-linecap="round" fill="none" class="draw-path"/><path d="M75 25 L25 75" stroke="#60a5fa" stroke-width="10" stroke-linecap="round" fill="none" class="draw-path" style="animation-delay: 0.2s;"/></svg>`;
-        }
-        function getOSVG() {
-            return `<svg class="w-16 h-16" viewBox="0 0 100 100"><circle cx="50" cy="50" r="30" stroke="#f87171" stroke-width="10" stroke-linecap="round" fill="none" class="draw-circle"/></svg>`;
-        }
+        function getXSVG() { return `<svg class="w-16 h-16" viewBox="0 0 100 100"><path d="M25 25 L75 75" stroke="#60a5fa" stroke-width="10" stroke-linecap="round" fill="none" class="draw-path"/><path d="M75 25 L25 75" stroke="#60a5fa" stroke-width="10" stroke-linecap="round" fill="none" class="draw-path" style="animation-delay:0.2s"/></svg>`; }
+        function getOSVG() { return `<svg class="w-16 h-16" viewBox="0 0 100 100"><circle cx="50" cy="50" r="30" stroke="#f87171" stroke-width="10" stroke-linecap="round" fill="none" class="draw-circle"/></svg>`; }
     </script>
     <style>
         @keyframes draw { to { stroke-dashoffset: 0; } }
         .draw-path { stroke-dasharray: 100; stroke-dashoffset: 100; animation: draw 0.3s forwards; }
         .draw-circle { stroke-dasharray: 200; stroke-dashoffset: 200; animation: draw 0.5s forwards; }
-        body { background: radial-gradient(circle at center, #1e293b, #0f172a); color: white; }
+        body { background: #0f172a; color: white; display: flex; align-items: center; justify-content: center; min-h-screen; font-family: sans-serif; }
     </style>
 </head>
-<body class="flex items-center justify-center min-h-screen">
-
-    <!-- 로비 -->
-    <div id="lobby" class="bg-gray-900/80 backdrop-blur-md p-10 rounded-3xl border border-white/10 shadow-2xl text-center w-80">
-        <h1 class="text-4xl font-black mb-6 tracking-tighter">TIC TAC TOE</h1>
-        <input id="roomInput" type="text" placeholder="방 번호 입력" 
-            class="w-full bg-black border border-gray-700 rounded-xl px-4 py-4 mb-4 text-center text-2xl font-bold focus:outline-none focus:ring-2 focus:ring-blue-500 text-white">
-        <button onclick="joinRoom()" class="w-full bg-blue-600 hover:bg-blue-500 py-4 rounded-xl font-bold shadow-lg transition active:scale-95 mb-3">방 입장하기</button>
-        <button onclick="createRandomRoom()" class="w-full bg-white/5 hover:bg-white/10 py-3 rounded-xl text-sm transition text-gray-400 border border-white/5">랜덤 방 만들기</button>
+<body>
+    <div id="lobby" class="bg-gray-900 p-8 rounded-3xl border border-white/10 text-center w-80 shadow-2xl">
+        <h1 class="text-3xl font-black mb-6 tracking-tighter">TIC TAC TOE</h1>
+        <input id="roomInput" type="text" placeholder="방 번호" class="w-full bg-black border border-gray-700 rounded-xl px-4 py-3 mb-4 text-center text-xl font-bold text-white outline-none">
+        <button onclick="joinRoom()" class="w-full bg-blue-600 py-4 rounded-xl font-bold mb-2 active:scale-95 transition">입장</button>
+        <button onclick="createRandomRoom()" class="w-full bg-gray-800 py-2 rounded-xl text-xs text-gray-400">랜덤 생성</button>
     </div>
-
-    <!-- 게임 화면 -->
-    <div id="game-area" class="hidden text-center px-4 w-full max-w-sm">
-        <div id="info" class="text-[10px] text-gray-500 mb-2 uppercase tracking-widest font-mono"></div>
-        <div id="status" class="mb-6"></div>
-        
-        <div class="grid grid-cols-3 gap-4 bg-white/5 p-4 rounded-3xl border border-white/10 shadow-2xl">
-            <div id="cell-0" onclick="makeMove(0)" class="cell aspect-square flex items-center justify-center bg-gray-900 rounded-2xl cursor-pointer hover:bg-gray-800 h-24 shadow-inner"></div>
-            <div id="cell-1" onclick="makeMove(1)" class="cell aspect-square flex items-center justify-center bg-gray-900 rounded-2xl cursor-pointer hover:bg-gray-800 h-24 shadow-inner"></div>
-            <div id="cell-2" onclick="makeMove(2)" class="cell aspect-square flex items-center justify-center bg-gray-900 rounded-2xl cursor-pointer hover:bg-gray-800 h-24 shadow-inner"></div>
-            <div id="cell-3" onclick="makeMove(3)" class="cell aspect-square flex items-center justify-center bg-gray-900 rounded-2xl cursor-pointer hover:bg-gray-800 h-24 shadow-inner"></div>
-            <div id="cell-4" onclick="makeMove(4)" class="cell aspect-square flex items-center justify-center bg-gray-900 rounded-2xl cursor-pointer hover:bg-gray-800 h-24 shadow-inner"></div>
-            <div id="cell-5" onclick="makeMove(5)" class="cell aspect-square flex items-center justify-center bg-gray-900 rounded-2xl cursor-pointer hover:bg-gray-800 h-24 shadow-inner"></div>
-            <div id="cell-6" onclick="makeMove(6)" class="cell aspect-square flex items-center justify-center bg-gray-900 rounded-2xl cursor-pointer hover:bg-gray-800 h-24 shadow-inner"></div>
-            <div id="cell-7" onclick="makeMove(7)" class="cell aspect-square flex items-center justify-center bg-gray-900 rounded-2xl cursor-pointer hover:bg-gray-800 h-24 shadow-inner"></div>
-            <div id="cell-8" onclick="makeMove(8)" class="cell aspect-square flex items-center justify-center bg-gray-900 rounded-2xl cursor-pointer hover:bg-gray-800 h-24 shadow-inner"></div>
+    <div id="game-area" class="hidden text-center w-80">
+        <div id="info" class="text-[10px] text-gray-500 mb-2 font-mono"></div>
+        <div id="status"></div>
+        <div class="grid grid-cols-3 gap-3 bg-white/5 p-3 rounded-3xl border border-white/10">
+            <div id="cell-0" onclick="makeMove(0)" class="aspect-square flex items-center justify-center bg-gray-900 rounded-2xl cursor-pointer h-24"></div>
+            <div id="cell-1" onclick="makeMove(1)" class="aspect-square flex items-center justify-center bg-gray-900 rounded-2xl cursor-pointer h-24"></div>
+            <div id="cell-2" onclick="makeMove(2)" class="aspect-square flex items-center justify-center bg-gray-900 rounded-2xl cursor-pointer h-24"></div>
+            <div id="cell-3" onclick="makeMove(3)" class="aspect-square flex items-center justify-center bg-gray-900 rounded-2xl cursor-pointer h-24"></div>
+            <div id="cell-4" onclick="makeMove(4)" class="aspect-square flex items-center justify-center bg-gray-900 rounded-2xl cursor-pointer h-24"></div>
+            <div id="cell-5" onclick="makeMove(5)" class="aspect-square flex items-center justify-center bg-gray-900 rounded-2xl cursor-pointer h-24"></div>
+            <div id="cell-6" onclick="makeMove(6)" class="aspect-square flex items-center justify-center bg-gray-900 rounded-2xl cursor-pointer h-24"></div>
+            <div id="cell-7" onclick="makeMove(7)" class="aspect-square flex items-center justify-center bg-gray-900 rounded-2xl cursor-pointer h-24"></div>
+            <div id="cell-8" onclick="makeMove(8)" class="aspect-square flex items-center justify-center bg-gray-900 rounded-2xl cursor-pointer h-24"></div>
         </div>
-
-        <div class="mt-10 flex justify-center gap-6">
-            <button onclick="resetGame()" class="text-gray-500 hover:text-white text-xs underline decoration-gray-700 underline-offset-4">게임 리셋</button>
-            <button onclick="location.reload()" class="text-gray-500 hover:text-white text-xs underline decoration-gray-700 underline-offset-4">방 나가기</button>
-        </div>
+        <button onclick="resetGame()" class="mt-8 text-gray-500 text-sm underline">초기화</button>
     </div>
-
 </body>
 </html>
 
